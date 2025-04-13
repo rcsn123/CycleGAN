@@ -1,0 +1,143 @@
+"""This package contains modules related to objective functions, optimizations, and network architectures.
+
+To add a custom model class called 'dummy', you need to add a file called 'dummy_model.py' and define a subclass DummyModel inherited from BaseModel.
+You need to implement the following five functions:
+    -- <__init__>:                      initialize the class; first call BaseModel.__init__(self, opt).
+    -- <set_input>:                     unpack data from dataset and apply preprocessing.
+    -- <forward>:                       produce intermediate results.
+    -- <optimize_parameters>:           calculate loss, gradients, and update network weights.
+    -- <modify_commandline_options>:    (optionally) add model-specific options and set default options.
+
+In the function <__init__>, you need to define four lists:
+    -- self.loss_names (str list):          specify the training losses that you want to plot and save.
+    -- self.model_names (str list):         define networks used in our training.
+    -- self.visual_names (str list):        specify the images that you want to display and save.
+    -- self.optimizers (optimizer list):    define and initialize optimizers. You can define one optimizer for each network. If two networks are updated at the same time, you can use itertools.chain to group them. See cycle_gan_model.py for an usage.
+
+Now you can use the model class by specifying flag '--model dummy'.
+See our template model class 'template_model.py' for more details.
+"""
+
+import importlib
+from models.base_model import BaseModel
+
+
+def find_model_using_name(model_name):
+    """Import the module "models/[model_name]_model.py".
+
+    In the file, the class called DatasetNameModel() will
+    be instantiated. It has to be a subclass of BaseModel,
+    and it is case-insensitive.
+    """
+    model_filename = "models." + model_name + "_model"
+    modellib = importlib.import_module(model_filename)
+    model = None
+    target_model_name = model_name.replace('_', '') + 'model'
+    for name, cls in modellib.__dict__.items():
+        if name.lower() == target_model_name.lower() \
+           and issubclass(cls, BaseModel):
+            model = cls
+
+    if model is None:
+        print("In %s.py, there should be a subclass of BaseModel with class name that matches %s in lowercase." % (model_filename, target_model_name))
+        exit(0)
+
+    return model
+
+
+def get_option_setter(model_name):
+    """Return the static method <modify_commandline_options> of the model class."""
+    model_class = find_model_using_name(model_name)
+    return model_class.modify_commandline_options
+
+
+def create_model(opt):
+    """Create a model given the option.
+
+    This function warps the class CustomDatasetDataLoader.
+    This is the main interface between this package and 'train.py'/'test.py'
+
+    Example:
+        >>> from models import create_model
+        >>> model = create_model(opt)
+    """
+    model = find_model_using_name(opt.model)
+    instance = model(opt)
+    print("model [%s] was created" % type(instance).__name__)
+    return instance
+
+#add ssim_loss for python
+import torch
+import torch.nn.functional as F
+from torch.autograd import Variable
+import numpy as np
+from math import exp
+
+def gaussian(window_size, sigma):
+    gauss = torch.Tensor([exp(-(x - window_size//2)**2/float(2*sigma**2)) for x in range(window_size)])
+    return gauss/gauss.sum()
+
+def create_window(window_size, channel):
+    _1D_window = gaussian(window_size, 1.5).unsqueeze(1)
+    _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
+    window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
+    return window
+
+def _ssim(img1, img2, window, window_size, channel, size_average = True):
+    mu1 = F.conv2d(img1, window, padding = window_size//2, groups = channel)
+    mu2 = F.conv2d(img2, window, padding = window_size//2, groups = channel)
+
+    mu1_sq = mu1.pow(2)
+    mu2_sq = mu2.pow(2)
+    mu1_mu2 = mu1*mu2
+
+    sigma1_sq = F.conv2d(img1*img1, window, padding = window_size//2, groups = channel) - mu1_sq
+    sigma2_sq = F.conv2d(img2*img2, window, padding = window_size//2, groups = channel) - mu2_sq
+    sigma12 = F.conv2d(img1*img2, window, padding = window_size//2, groups = channel) - mu1_mu2
+
+    C1 = 0.01**2
+    C2 = 0.03**2
+
+    ssim_map = ((2*mu1_mu2 + C1)*(2*sigma12 + C2))/((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2))
+
+    if size_average:
+        return ssim_map.mean()
+    else:
+        return ssim_map.mean(1).mean(1).mean(1)
+
+class SSIM(torch.nn.Module):
+    def __init__(self, window_size = 11, size_average = True):
+        super(SSIM, self).__init__()
+        self.window_size = window_size
+        self.size_average = size_average
+        self.channel = 1
+        self.window = create_window(window_size, self.channel)
+
+    def forward(self, img1, img2):
+        (_, channel, _, _) = img1.size()
+
+        if channel == self.channel and self.window.data.type() == img1.data.type():
+            window = self.window
+        else:
+            window = create_window(self.window_size, channel)
+            
+            if img1.is_cuda:
+                window = window.cuda(img1.get_device())
+            window = window.type_as(img1)
+            
+            self.window = window
+            self.channel = channel
+
+
+        return _ssim(img1, img2, window, self.window_size, channel, self.size_average)
+
+def ssim(img1, img2, window_size = 11, size_average = True):
+    (_, channel, _, _) = img1.size()
+    window = create_window(window_size, channel)
+    
+    if img1.is_cuda:
+        window = window.cuda(img1.get_device())
+    window = window.type_as(img1)
+    
+    return _ssim(img1, img2, window, window_size, channel, size_average)
+
