@@ -4,7 +4,12 @@
 
 本项目采用PSNR、SSIM、LNCC等指标评估图像增强效果，指标变化如下：
 
-![image]
+![image](https://github.com/rcsn123/CycleGAN/blob/main/%E5%A2%9E%E5%BC%BA%E6%95%88%E6%9E%9C%E6%8C%87%E6%A0%87%E9%87%8F%E5%8C%96%E5%AF%B9%E6%AF%94.png)
+
+部分图像增强效果对比如下：
+
+
+![image](https://github.com/rcsn123/CycleGAN/blob/main/%E9%83%A8%E5%88%86%E5%9B%BE%E5%83%8F%E5%A2%9E%E5%BC%BA%E7%BB%93%E6%9E%9C%E5%B1%95%E7%A4%BA.png)
 
 
 
